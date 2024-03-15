@@ -1,0 +1,447 @@
+﻿Program.Sub.Preflight.Start
+V.Global.sOrderNo.Declare(String)
+V.Global.sShipTo.Declare(String, "N")
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.Try
+	
+	V.Local.sError.Declare(String,"")
+	V.Local.sHook.Declare(String,"")
+	V.Local.sOrdNum.Declare(String)
+	
+	F.ODBC.Connection!con.OpenCompanyConnection
+	
+	V.Local.sHook.Set(V.Caller.Hook)
+	
+	F.Intrinsic.Control.SelectCase(V.Local.sHook)
+		'Hook 11560 is the entry hook for Order Header
+		F.Intrinsic.Control.Case("11560")
+			V.Local.sOrdNum.Set(V.Passed.000003)
+			V.Global.sOrderNo.Set(V.Local.sOrdNum)
+			
+			v.Passed.000104.Set("IncoTerms") 		'FOB label
+			v.Passed.000102.Set("Freight Terms")	'Freight Zone label
+			v.Passed.000117.Set("GS Quote #")		'Sort 1 label
+			v.Passed.000116.Set("Quote Log #")		'Sort 2 label
+			v.passed.000203.Set("WF View")
+			
+			'Set Label on Script 2 Button
+			V.Passed.000202.Set("Notes")
+			'LBL-GAB-1
+			'FOR LABEL
+			'Set horizontal position
+			f.Intrinsic.Variable.SetProperty("GAB-LBL-1","PL",85)
+			'Set vertical position
+			F.Intrinsic.Variable.SetProperty("GAB-LBL-1","PT",17)
+			f.Intrinsic.UI.ChangeCallerProperty(v.Passed.GAB-LBL-1,"HIDE",0)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",0)
+			V.Passed.GAB-LBL-1.Set("Approved")
+			
+			'GAB-CHK-1
+			'FOR CHECK BOX
+			'Set horizontal position
+			f.Intrinsic.Variable.SetProperty("GAB-CHK-1","PL", 65)
+			'Set vertical position
+			F.Intrinsic.Variable.SetProperty("GAB-CHK-1","PT",17)
+			f.Intrinsic.UI.ChangeCallerProperty(v.Passed.GAB-CHK-1,"HIDE",0)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",0)
+			
+			V.Passed.GAB-CHK-1.Set("N")
+			
+			F.Intrinsic.Control.If(V.Local.sOrdNum.Trim,<>,"")
+				F.Intrinsic.Control.CallSub(DshbrdOpen)
+				F.Intrinsic.Control.ExitSub
+			F.Intrinsic.Control.Else
+				F.Intrinsic.Control.ExitSub
+			F.Intrinsic.Control.EndIf
+		'HOOK 11565 Loads the order information
+		F.Intrinsic.Control.Case("11565")			
+			F.Intrinsic.Control.CallSub(LoadOrderApproval)
+		'Hook for when Ship to ID is changed
+		F.Intrinsic.Control.Case("11570")
+			V.Global.sShipTo.Set("Y")
+			F.Intrinsic.Control.CallSub(LoadOrderApproval)
+		'Hook 11872 is the post save hook on header screen
+		F.Intrinsic.Control.Case("11870")
+			
+			F.Intrinsic.Control.CallSub(SaveEntry)
+		
+		'Hook 12010 is the Populate hook for Order Lines
+		F.Intrinsic.Control.Case("12010")
+			v.passed.000141.Set("WF View")
+			F.Intrinsic.Control.CallSub(populate)
+			
+		'Hook 12705 is the Line Change Hook
+		F.Intrinsic.Control.Case("12705")
+			F.Intrinsic.Control.CallSub(entrycheck)
+
+			
+	F.Intrinsic.Control.EndSelect
+	F.Intrinsic.Control.CallSub(unload)
+	F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+		F.Intrinsic.String.Build("Project: GCG_6093_SOLnApproval.g2u{0}{0}Subroutine: {1}{0}Error Occurred {2} with description {3}",V.Ambient.NewLine,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Local.sError)
+		F.Intrinsic.UI.Msgbox(V.Local.sError)
+		F.Intrinsic.Control.CallSub(unload)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.DshbrdOpen.Start
+F.Intrinsic.Control.Try
+V.Local.bApprover.Declare(Boolean)
+V.Local.sOrdNum.Declare(String)
+V.Local.sSQL.Declare(String)
+
+V.Local.sOrdNum.Set(V.Global.sOrderNo)
+F.Global.Security.IsInGroup(V.Caller.User, "SOAPP", V.Caller.CompanyCode, V.Local.bApprover)
+
+F.Intrinsic.String.LPad(V.Local.sOrdNum,0,7,V.Local.sOrdNum)
+	F.Intrinsic.String.Build("SELECT TOP 1 APPROVAL_FLAG FROM GCG_6093_SO_LINE_APP where ORDER_NO = '{0}' ORDER BY ORDER_LINE", V.Local.sOrdNum,V.Local.sSQL)
+	F.ODBC.Connection!con.OpenLocalRecordsetRO("rstCheck", V.Local.sSQL)
+	F.Intrinsic.Control.If(V.ODBC.con!rstCheck.EOF, =, False)
+		F.Intrinsic.Control.If(V.ODBC.con!rstCheck.FieldValTrim!APPROVAL_FLAG, =, True)
+			V.Passed.GAB-CHK-1.Set("Y")
+			F.Intrinsic.Control.If(V.Local.bApprover,=,True)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+			F.Intrinsic.Control.Else
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+			F.Intrinsic.Control.EndIf
+			F.ODBC.con!rstCheck.Close
+		F.Intrinsic.Control.Else
+			V.Passed.GAB-CHK-1.Set("N")
+			F.Intrinsic.Control.If(V.Local.bApprover,=,True)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",0)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",0)
+			F.Intrinsic.Control.Else
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Else
+		V.Passed.GAB-CHK-1.Set("N")
+		F.Intrinsic.Control.If(V.Local.bApprover,=,True)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",0)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",0)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+		F.Intrinsic.Control.EndIf
+		F.ODBC.con!rstCheck.Close
+	F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+		F.Intrinsic.String.Build("Project: GCG_6093_SOLnApproval.g2u{0}{0}Subroutine: {1}{0}Error Occurred {2} with description {3}",V.Ambient.NewLine,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Local.sError)
+		F.Intrinsic.UI.Msgbox(V.Local.sError)
+		F.Intrinsic.Control.CallSub(unload)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndTry
+Program.Sub.DshbrdOpen.End
+
+Program.Sub.LoadOrderApproval.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String,"")
+V.Local.bApprover.Declare(Boolean)
+V.Local.sCust.Declare(String)
+V.Local.sOrderNo.Declare(String)
+V.Local.sSQL.Declare(String)
+
+F.Global.Security.IsInGroup(V.Caller.User, "SOAPP", V.Caller.CompanyCode, V.Local.bApprover)
+
+V.Local.sOrderNo.Set(V.Passed.000003)
+F.Intrinsic.String.LPad(V.Local.sOrderNo,0,7,V.Local.sOrderNo)
+
+F.Intrinsic.String.Build("SELECT TOP 1 APPROVAL_FLAG FROM GCG_6093_SO_LINE_APP where ORDER_NO = '{0}' ORDER BY ORDER_LINE DESC", V.Local.sOrderNo,V.Local.sSQL)
+F.ODBC.Connection!con.OpenLocalRecordsetRO("rstCheck", V.Local.sSQL)
+	F.Intrinsic.Control.If(V.ODBC.con!rstCheck.EOF, =, False)
+		F.Intrinsic.Control.If(V.ODBC.con!rstCheck.FieldValTrim!APPROVAL_FLAG, =, True)
+			V.Passed.GAB-CHK-1.Set("Y")
+			F.Intrinsic.Control.If(V.Local.bApprover,=,True)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+			F.Intrinsic.Control.Else
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+			F.Intrinsic.Control.EndIf
+			F.ODBC.con!rstCheck.Close
+		F.Intrinsic.Control.Else
+			V.Passed.GAB-CHK-1.Set("N")
+			F.Intrinsic.Control.If(V.Local.bApprover,=,True)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",0)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",0)
+			F.Intrinsic.Control.Else
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Else
+		V.Passed.GAB-CHK-1.Set("N")
+		F.Intrinsic.Control.If(V.Local.bApprover,=,True)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",0)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",0)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+		F.Intrinsic.Control.EndIf
+		F.ODBC.con!rstCheck.Close
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+		F.Intrinsic.String.Build("Project: GCG_6093_SOLnApproval.g2u{0}{0}Subroutine: {1}{0}Error Occurred {2} with description {3}",V.Ambient.NewLine,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Local.sError)
+		F.Intrinsic.UI.Msgbox(V.Local.sError)
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndTry
+Program.Sub.LoadOrderApproval.End
+
+Program.Sub.unload.Start
+F.Intrinsic.Control.Try
+	V.Local.sError.Declare(String,"")
+	
+	F.ODBC.Connection!con.Close
+	F.Intrinsic.Control.End
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+		F.Intrinsic.String.Build("Project: GCG_6093_SOLnApproval.g2u{0}{0}Subroutine: {1}{0}Error Occurred {2} with description {3}",V.Ambient.NewLine,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Local.sError)
+		F.Intrinsic.UI.Msgbox(V.Local.sError)
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndTry
+Program.Sub.unload.End
+
+Program.Sub.Populate.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String,"")
+V.Local.bApprover.Declare(Boolean)
+V.Local.sOrdNumb.Declare(String)
+V.Local.sLine.Declare(String)
+V.Local.sSql.Declare(String)
+
+F.Global.Security.IsInGroup(V.Caller.User, "SOAPP", V.Caller.CompanyCode, V.Local.bApprover)
+'This subroutine makes the custom checkbox and label visible to the user
+	
+'FOR LABEL
+'Set horizontal position
+f.Intrinsic.Variable.SetProperty("GAB-LBL-1","PL",384)
+'Set vertical position
+F.Intrinsic.Variable.SetProperty("GAB-LBL-1","PT",8)
+f.Intrinsic.UI.ChangeCallerProperty(v.Passed.GAB-LBL-1,"HIDE",0)
+F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",0)
+V.Passed.GAB-LBL-1.Set("Approved")
+	
+'FOR TEXT BOX
+'Set horizontal position
+f.Intrinsic.Variable.SetProperty("GAB-CHK-1","PL",364)
+'Set vertical position
+F.Intrinsic.Variable.SetProperty("GAB-CHK-1","PT",8)
+f.Intrinsic.UI.ChangeCallerProperty(v.Passed.GAB-CHK-1,"HIDE",0)
+F.Intrinsic.Control.If(V.Local.bApprover,=,True)
+	F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",0)
+F.Intrinsic.Control.Else
+	F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+F.Intrinsic.Control.EndIf
+	
+
+'This subroutine will set the custom checkbox and Lock/unlock the Gen Wo button according to the data saved in the table
+	
+F.Intrinsic.String.LPad(V.Passed.000060, "0", 7, V.Local.sOrdNumb)
+F.Intrinsic.String.RPad(V.Passed.000051, "0", 2, V.Local.sLine)
+F.Intrinsic.String.LPad(V.Local.sLine, "0", 4, V.Local.sLine)
+	
+F.Intrinsic.String.Build("Select APPROVAL_FLAG from GCG_6093_SO_LINE_APP where ORDER_NO = '{0}' and ORDER_LINE = '{1}' ", V.Local.sOrdNumb, V.Local.sLine, V.Local.sSql)
+F.ODBC.Connection!con.OpenLocalRecordsetRO("rstCheck", V.Local.sSql)
+F.Intrinsic.Control.If(V.ODBC.con!rstCheck.EOF, =, False)
+	F.Intrinsic.Control.If(V.ODBC.con!rstCheck.FieldValTrim!APPROVAL_FLAG, =, True)
+		F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+		F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+		F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000061, "LOCK", 0)
+
+		
+		V.Passed.GAB-CHK-1.Set("Y")
+		F.ODBC.con!rstCheck.Close
+		F.Intrinsic.Control.ExitSub
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Else
+	F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000061, "LOCK", 1)
+	F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+	V.Passed.GAB-CHK-1.Set("N")
+	
+	F.ODBC.con!rstCheck.Close
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+		F.Intrinsic.String.Build("Project: GCG_6093_SOLnApproval.g2u{0}{0}Subroutine: {1}{0}Error Occurred {2} with description {3}",V.Ambient.NewLine,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Local.sError)
+		F.Intrinsic.UI.Msgbox(V.Local.sError)
+		F.Intrinsic.Control.CallSub(unload)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndTry
+Program.Sub.Populate.End
+
+Program.Sub.EntryCheck.Start
+F.Intrinsic.Control.Try
+	V.Local.bApprover.Declare(Boolean)
+	V.Local.sError.Declare(String)
+	V.Local.sOrdNumb.Declare(String)
+	V.Local.sLine.Declare(String)
+	V.Local.sSql.Declare(String)
+	
+	F.Global.Security.IsInGroup(V.Caller.User, "SOAPP", V.Caller.CompanyCode, V.Local.bApprover)
+	'This subroutine will set the custom checkbox and Lock/unlock the Gen Wo button according to the data saved in the table
+	
+	F.Intrinsic.String.LPad(V.Passed.000060, "0", 7, V.Local.sOrdNumb)
+	F.Intrinsic.String.RPad(V.Passed.000051, "0", 2, V.Local.sLine)
+	F.Intrinsic.String.LPad(V.Local.sLine, "0", 4, V.Local.sLine)
+	
+	F.Intrinsic.String.Build("Select APPROVAL_FLAG from GCG_6093_SO_LINE_APP where ORDER_NO = '{0}' and ORDER_LINE = '{1}' ", V.Local.sOrdNumb, V.Local.sLine, V.Local.sSql)
+	F.ODBC.Connection!con.OpenLocalRecordsetRO("rstCheck", V.Local.sSql)
+	F.Intrinsic.Control.If(V.ODBC.con!rstCheck.EOF, =, False)
+		F.Intrinsic.Control.If(V.ODBC.con!rstCheck.FieldValTrim!APPROVAL_FLAG, =, True)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000061, "LOCK", 0)
+			V.Passed.GAB-CHK-1.Set("Y")
+			F.ODBC.con!rstCheck.Close
+			F.Intrinsic.Control.ExitSub
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Else
+		F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1,"LOCK",1)
+		F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"LOCK",1)
+		F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000061, "LOCK", 1)
+		V.Passed.GAB-CHK-1.Set("N")
+	
+		F.ODBC.con!rstCheck.Close
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+		F.Intrinsic.String.Build("Project: GCG_6093_SOLnApproval.g2u{0}{0}Subroutine: {1}{0}Error Occurred {2} with description {3}",V.Ambient.NewLine,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Local.sError)
+		F.Intrinsic.UI.Msgbox(V.Local.sError)
+		F.Intrinsic.Control.CallSub(unload)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndTry
+Program.Sub.EntryCheck.End
+
+Program.Sub.SaveEntry.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String)
+V.Local.bPrevFlag.Declare(Boolean)
+V.Local.iCnt.Declare(Long)
+V.Local.sOrdNumb.Declare(String)
+V.Local.sLine.Declare(String)
+V.Local.sLoc.Declare(String)
+V.Local.sSql.Declare(String)
+V.Local.sPrevFlag.Declare(String)
+V.Local.sFlag.Declare(String)
+V.Local.sWFTitle.Declare(String)
+V.Local.sRet.Declare(String)
+V.Local.sStatus.Declare(String)
+V.Local.sWFId.Declare(String)
+V.Local.sSelect.Declare(String)
+
+
+'This subroutine will either update the APPROVAL_FLAG in an existing entry or create a new entry in the SO_LINE_APPROVAL table in the post save hook
+
+F.Intrinsic.String.LPad(V.Passed.000003, "0", 7, V.Local.sOrdNumb)
+
+	
+V.Local.sLoc.Set(V.Passed.000065)
+
+F.Intrinsic.Control.If(V.Passed.GAB-CHK-1.Trim, =, "Y")
+	V.Local.sFlag.Set("1")
+F.Intrinsic.Control.Else
+	V.Local.sFlag.Set("0")
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.If(V.DataTable.dtOrderLines.Exists)
+	F.Data.DataTable.Close("dtOrderLines")
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.String.Build("SELECT ORDER_NO, RECORD_NO FROM V_ORDER_LINES WHERE ORDER_NO = '{0}'", V.Local.sOrdNumb, V.Local.sSql)
+	F.Data.DataTable.CreateFromSQL("dtOrderLines", "con", V.Local.sSql, True)
+F.Intrinsic.Control.If(V.DataTable.dtOrderLines.RowCount--,=,-1)
+	F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.For(V.Local.iCnt,0,V.DataTable.dtOrderLines.RowCount--,1)
+	V.Local.sOrdNumb.Set(V.DataTable.dtOrderLines(V.Local.iCnt).ORDER_NO!FieldVal)
+	V.Local.sLine.Set(V.DataTable.dtOrderLines(V.Local.iCnt).RECORD_NO!FieldVal)
+	F.Intrinsic.String.Build("Select * from SO_LINE_APPROVAL where ORDER_NO = '{0}' and LINE = '{1}' ", V.Local.sOrdNumb, V.Local.sLine, V.Local.sSql)
+	F.ODBC.Connection!con.OpenLocalRecordsetRW("rstCheck", V.Local.sSql)
+	F.Intrinsic.Control.If(V.ODBC.con!rstCheck.EOF, =, False)
+		F.ODBC.con!rstCheck.Set!APPROVAL_FLAG(V.Local.sFlag)
+		F.ODBC.con!rstCheck.Set!FILLER("")
+		F.ODBC.con!rstCheck.Update
+	F.Intrinsic.Control.Else
+		F.ODBC.con!rstCheck.AddNew
+		F.ODBC.con!rstCheck.Set!ORDER_NO(V.Local.sOrdNumb)
+		F.ODBC.con!rstCheck.Set!LINE(V.Local.sLine)
+		F.ODBC.con!rstCheck.Set!APPROVAL_FLAG(V.Local.sFlag)
+		F.ODBC.con!rstCheck.Set!FILLER("")
+		F.ODBC.con!rstCheck.Update	
+	F.Intrinsic.Control.EndIf
+	F.ODBC.con!rstCheck.Close
+	'add logic to save the date approved to a new custom table 
+	F.Intrinsic.String.Build("SELECT * FROM GCG_6093_SO_LINE_APP WHERE ORDER_NO = '{0}' AND ORDER_LINE ='{1}'", V.Local.sOrdNumb, V.Local.sLine, V.Local.sSql)
+	F.ODBC.Connection!con.OpenLocalRecordsetRW("rstAPPDate", V.Local.sSql)
+	F.Intrinsic.Control.If(V.ODBC.con!rstAPPDate.EOF,=,False)
+		V.Local.bPrevFlag.Set(V.ODBC.con!rstAPPDate.FieldVal!APPROVAL_FLAG)
+		F.ODBC.con!rstAPPDate.Set!APPROVAL_FLAG(V.Local.sFlag)
+		F.Intrinsic.Control.If(V.Local.bPrevFlag,=,False, "AND", V.Local.sFlag, =, 1)
+			F.ODBC.con!rstAPPDate.Set!APPROVAL_DATE(V.Ambient.Date.FormatYYYY-MM-DD)
+		F.Intrinsic.Control.EndIf
+		F.ODBC.con!rstAPPDate.Update	
+	F.Intrinsic.Control.Else
+		F.ODBC.con!rstAPPDate.AddNew
+		F.ODBC.con!rstAPPDate.Set!ORDER_NO(V.Local.sOrdNumb)
+		F.ODBC.con!rstAPPDate.Set!ORDER_LINE(V.Local.sLine)
+		F.ODBC.con!rstAPPDate.Set!APPROVAL_FLAG(V.Local.sFlag)
+		F.Intrinsic.Control.If(v.Local.sFlag,=,1)
+			F.ODBC.con!rstAPPDate.Set!APPROVAL_DATE(V.Ambient.Date.FormatYYYY-MM-DD)
+		F.Intrinsic.Control.EndIf
+		F.ODBC.con!rstAPPDate.Update	
+	F.Intrinsic.Control.EndIf
+	F.ODBC.con!rstAPPDate.Close
+F.Intrinsic.Control.Next(V.Local.iCnt)
+
+F.Intrinsic.Control.If(V.Local.sOrdNumb.Trim,=,"")
+	V.Passed.GAB-CHK-1.Set("N")
+F.Intrinsic.Control.Else
+	F.Intrinsic.Control.If(V.Local.sFlag,=,1)
+		V.Passed.GAB-CHK-1.Set("Y")
+	F.Intrinsic.Control.Elseif(V.Local.sFlag,=,0)
+		V.Passed.GAB-CHK-1.Set("N")
+	F.Intrinsic.Control.EndIf
+	
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+		F.Intrinsic.String.Build("Project: GCG_6093_SOLnApproval.g2u{0}{0}Subroutine: {1}{0}Error Occurred {2} with description {3}",V.Ambient.NewLine,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Local.sError)
+		F.Intrinsic.UI.Msgbox(V.Local.sError)
+		F.Intrinsic.Control.CallSub(unload)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndTry
+Program.Sub.SaveEntry.End
+
+Program.Sub.Comments.Start
+${$0$}$Sales Order Line Approval$}$SISCO$}$11/22/2016 3:59:52 PM$}$False
+${$3$}$0$}$$}$0$}$-1$}$$}$12:00:00 AM$}$This project was designed and coded by team SkyNet on November 22 2016
+${$5$}$2.0.0.0$}$2
+${$6$}$acollins$}$20210527185315534$}$h98hERc2yV72q0GaUGlwSaoK/aefTdVkB5SGxLdVwE9n2hOHKn7XmjRvPXn+NeRWK61OwoD0WVa4vN1v2/t6eQ==
+Program.Sub.Comments.End
